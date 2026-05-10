@@ -105,6 +105,12 @@ export function ensureDefaultConfig() {
             defaultLimitMiB: 500,
             dailyCheckInMiB: 0,
         },
+        privacy: {
+            secretsVault: {
+                requireForApiKeys: true,
+                unlockTtlMinutes: 1440,
+            },
+        },
     };
 
     const config = loadFullConfig();

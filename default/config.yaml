@@ -429,7 +429,7 @@ email:
     password: ''
   from: ''
   fromName: 'SillyTavern'
-  # 网站访问地址，用于在邮件中生成登录链接（留空则不显示链接�?
+  # 网站访问地址，用于在邮件中生成登录链接（留空则不显示链接�?
   siteUrl: ''
 
 userStorage:
@@ -437,3 +437,14 @@ userStorage:
   defaultLimitMiB: 500
   dailyCheckInMiB: 0
 
+
+
+# -- API 密钥保险箱 --
+# 用户可为自己的 API key 设置独立密码，落盘前以 AES-256-GCM 加密；
+# 服务端仅在解锁 TTL 内于内存缓存派生密钥。
+privacy:
+  secretsVault:
+    # 是否强制用户在保存 API key 前启用保险箱（默认启用，保护隐私）
+    requireForApiKeys: true
+    # 解锁后服务端内存密钥保留时间（分钟），默认 24 小时
+    unlockTtlMinutes: 1440
