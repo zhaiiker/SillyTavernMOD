@@ -186,11 +186,14 @@ export async function setupPrivateRoutes(app) {
     app.use('/api/stc/privacy-vault', privacyVaultRouter);
 
     // WeChat Bot bridge (iLink protocol)
-    if (getStcConfig('wechat.enabled', false)) {
-        const { router: wechatBridgeRouter } = await import('./routes/private/wechat-bridge.js');
-        app.use('/api/stc/wechat', wechatBridgeRouter);
+    // Route is ALWAYS registered (like privacy-vault) so the frontend /status endpoint
+    // can respond with {enabled:false} instead of 404. The route handler itself guards
+    // all destructive operations behind getStcConfig('wechat.enabled').
+    const { router: wechatBridgeRouter } = await import('./routes/private/wechat-bridge.js');
+    app.use('/api/stc/wechat', wechatBridgeRouter);
 
-        // Initialize WeChat bridge: load persisted bindings/sessions and auto-start workers
+    // Only auto-start workers if wechat is actually enabled
+    if (getStcConfig('wechat.enabled', false)) {
         try {
             const { loadBindings, getAllBindings, updateBindingStatus } = await import('./services/im-wechat/bridge/bindings.js');
             const { loadSessions } = await import('./services/im-wechat/bridge/sessions.js');

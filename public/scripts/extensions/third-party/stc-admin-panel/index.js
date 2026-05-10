@@ -1275,9 +1275,8 @@ async function wireWechatCard(content, showMsg) {
             const status = await r.json();
 
             if (!status.enabled) {
-                setBadge('<i class="fa-solid fa-circle-xmark"></i> 未开启', '#888', 'rgba(127,127,127,.1)', 'rgba(127,127,127,.3)');
-                hintEl.innerHTML = '管理员尚未启用微信 Bot 功能（config.yaml → wechat.enabled: true）。';
-                actionsEl.innerHTML = '';
+                // Hide the entire card when wechat is not enabled by admin
+                card.style.display = 'none';
                 return;
             }
 
