@@ -111,6 +111,28 @@ export function ensureDefaultConfig() {
                 unlockTtlMinutes: 1440,
             },
         },
+        wechat: {
+            enabled: false,
+            baseUrl: 'https://ilinkai.weixin.qq.com',
+            botType: 3,
+            maxConcurrentWorkers: 50,
+            longPollTimeoutMs: 40000,
+            perContactRateLimit: {
+                windowSec: 60,
+                maxMessages: 20,
+            },
+            typing: {
+                enabled: true,
+                intervalMs: 3000,
+            },
+            renderSanitizer: {
+                stripUnknownCustomTags: true,
+                imageDomainWhitelist: [],
+            },
+            contentModeration: {
+                keywordBlocklistFile: '',
+            },
+        },
     };
 
     const config = loadFullConfig();

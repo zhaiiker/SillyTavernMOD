@@ -381,6 +381,103 @@ enableDownloadableTokenizers: false
 | POST | `/api/stc/privacy-vault/unlock` | 解锁保险箱以使用已加密 API key |
 | POST | `/api/stc/privacy-vault/lock` | 立即锁定保险箱 |
 | POST | `/api/stc/privacy-vault/reset` | 重置保险箱（忘记密码时使用；需 `{confirm:"RESET"}`，会清空已加密密钥） |
+| POST | `/api/stc/wechat/qr/start` | 发起微信 Bot QR 扫码绑定（返回二维码 base64） |
+| POST | `/api/stc/wechat/qr/status` | 轮询 QR 扫码状态（pending/scanned/confirmed/expired） |
+| GET | `/api/stc/wechat/status` | 当前用户微信 Bot 绑定状态 |
+| POST | `/api/stc/wechat/unbind` | 解绑微信 Bot（需 `{confirm:"UNBIND"}`） |
+| GET | `/api/stc/wechat/chars` | 列出用户可用角色卡（给微信默认卡下拉用） |
+| POST | `/api/stc/wechat/set-character` | 设置微信默认角色卡 |
+| POST | `/api/stc/wechat/test-send` | 向指定联系人发送测试消息 |
+| GET | `/api/stc/wechat/logs` | 获取消息统计摘要 |
+| GET | `/api/stc/wechat/admin/pool` | 管理员：查看 worker 池状态 |
+
+## 微信 Bot 桥接（WeChat iLink Bridge）
+
+### 概述
+
+基于腾讯 iLink Bot 协议（`ilinkai.weixin.qq.com`）实现的微信个人号 AI Bot 桥接。用户在"我的账户"面板里扫码绑定一个微信小号后，该小号会被 AI 接管：其他人发消息给这个小号时，SillyTavern 会使用用户选中的角色卡 + LLM 配置生成回复并自动发回。
+
+### 架构
+
+```
+src/stc-mod/services/im-wechat/
+├── protocol/                      # iLink HTTP/JSON 协议层
+│   ├── types.js                   # 常量、JSDoc 类型定义
+│   ├── client.js                  # HTTP 封装（三元组鉴权）
+│   ├── qr.js                      # QR 码登录
+│   ├── long-poller.js             # getupdates 长轮询（35s hold + 断线重连）
+│   └── sender.js                  # sendmessage / sendtyping
+├── workers/                       # Worker 管理
+│   ├── pool.js                    # 启动/停止/挂起 workers，最大并发控制
+│   └── runner.js                  # Worker 状态类型 & 辅助函数
+└── bridge/                        # 业务逻辑（协议无关）
+    ├── processor.js               # 消息处理主管线
+    ├── command-parser.js           # /help /chars /use /new /who /undo
+    ├── headless-generate.js        # 服务端无头 LLM 生成
+    ├── render-sanitizer.js         # HTML/自定义标签清洗（纯文本输出）
+    ├── message-chunker.js          # 长消息分片（4000 字）
+    ├── sessions.js                 # 会话状态管理
+    ├── bindings.js                 # 用户绑定 CRUD
+    └── rate-limiter.js             # 滑动窗口限流
+```
+
+### 配置项（config.yaml）
+
+```yaml
+wechat:
+  enabled: false                    # 全站开关
+  baseUrl: https://ilinkai.weixin.qq.com
+  botType: 3
+  maxConcurrentWorkers: 50
+  longPollTimeoutMs: 40000
+  perContactRateLimit:
+    windowSec: 60
+    maxMessages: 20
+  typing:
+    enabled: true
+    intervalMs: 3000
+  renderSanitizer:
+    stripUnknownCustomTags: true
+    imageDomainWhitelist: []
+  contentModeration:
+    keywordBlocklistFile: ''
+```
+
+### 数据存储
+
+| 文件 | 内容 |
+|------|------|
+| `data/stc-mod/wechat-bindings.json` | 用户 → bot 绑定（botToken、botBaseUrl、状态、统计） |
+| `data/stc-mod/wechat-sessions.json` | 联系人会话状态（角色卡、chatPath、contextToken） |
+| `data/<handle>/chats/<char>/wechat__<hash>.jsonl` | 微信对话历史（独立于网页端 chat） |
+
+### 带前端角色卡的处理
+
+微信端的 LLM 输出经过 `render-sanitizer.js` 清洗后只发送**纯文本**：
+- 剥除所有 HTML 标签（`<iframe>`、`<script>`、`<style>`、自定义标签等）
+- `<b>`/`<strong>` → `**粗体**`，`<i>`/`<em>` → `*斜体*`
+- 去除 Markdown 图片 `![](url)`
+- 规范化换行（3+ 连续换行压成 2 个）
+- 超长消息按段落边界分片（≤4000 字/片）
+
+### 微信指令
+
+| 指令 | 效果 |
+|------|------|
+| `/help` | 显示帮助 |
+| `/chars` | 列出可用角色卡 |
+| `/use <名称>` | 切换角色卡（模糊匹配） |
+| `/new` | 清空上下文 |
+| `/who` | 查看当前角色 |
+| `/undo` | 撤销上一轮对话 |
+
+### V1 已知限制
+
+- 仅支持文本消息（语音取 ASR 文字、图片/文件/视频仅提示"不支持"）
+- Prompt 组装为最小子集（不含 World Info、Author's Note、Vector Memory、Group Chat）
+- 每个 STC 账号只能绑定一个微信小号
+- 微信会话与网页端完全隔离（独立 chat 文件）
+- 全站需管理员开启 `wechat.enabled: true` 才可使用
 
 ## 升级指南
 

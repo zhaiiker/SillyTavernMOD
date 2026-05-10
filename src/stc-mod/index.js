@@ -185,5 +185,54 @@ export async function setupPrivateRoutes(app) {
     const { router: privacyVaultRouter } = await import('./routes/private/privacy-vault.js');
     app.use('/api/stc/privacy-vault', privacyVaultRouter);
 
+    // WeChat Bot bridge (iLink protocol)
+    if (getStcConfig('wechat.enabled', false)) {
+        const { router: wechatBridgeRouter } = await import('./routes/private/wechat-bridge.js');
+        app.use('/api/stc/wechat', wechatBridgeRouter);
+
+        // Initialize WeChat bridge: load persisted bindings/sessions and auto-start workers
+        try {
+            const { loadBindings, getAllBindings, updateBindingStatus } = await import('./services/im-wechat/bridge/bindings.js');
+            const { loadSessions } = await import('./services/im-wechat/bridge/sessions.js');
+            const { startWorker } = await import('./services/im-wechat/workers/pool.js');
+            const { processMessages } = await import('./services/im-wechat/bridge/processor.js');
+            const { getUserDirectories } = await import('../users.js');
+
+            loadBindings();
+            loadSessions();
+
+            // Auto-start workers for all connected bindings
+            const bindings = getAllBindings();
+            let started = 0;
+            for (const [handle, binding] of Object.entries(bindings)) {
+                if (binding.status === 'connected' && binding.botToken) {
+                    try {
+                        const directories = getUserDirectories(handle);
+                        if (!directories) continue;
+                        const token = typeof binding.botToken === 'string' ? binding.botToken : '';
+                        if (!token) continue;
+
+                        startWorker(handle, {
+                            botToken: token,
+                            baseUrl: binding.botBaseUrl,
+                            onMessages: (h, msgs) => processMessages(h, msgs, { directories }),
+                            onTokenInvalid: (h) => updateBindingStatus(h, 'token_invalid'),
+                            onError: () => {},
+                        });
+                        started++;
+                    } catch (e) {
+                        console.warn(`[WX:${handle}] Failed to auto-start worker:`, e.message);
+                    }
+                }
+            }
+
+            if (started > 0) {
+                console.log(`[STC-MOD] WeChat bridge: ${started} worker(s) auto-started.`);
+            }
+        } catch (e) {
+            console.error('[STC-MOD] WeChat bridge initialization error:', e.message);
+        }
+    }
+
     console.log('[STC-MOD] Private API routes registered.');
 }

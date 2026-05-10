@@ -909,6 +909,28 @@ function buildUserPanelContent(purchaseLink = '') {
         </div>`;
     wrap.appendChild(vaultCard);
 
+    // ━━━━ 4c. 微信 Bot 绑定 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+    const wechatCard = document.createElement('div');
+    wechatCard.id = 'stc-wechat-card';
+    wechatCard.style.cssText = CARD;
+    wechatCard.innerHTML = `
+        <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;flex-wrap:wrap">
+            <div style="font-weight:600;font-size:.88em;opacity:.7;display:flex;align-items:center;gap:6px">
+                <i class="fa-brands fa-weixin"></i> 微信 Bot 绑定
+            </div>
+            <div id="stc-wx-badge" style="padding:3px 10px;border-radius:20px;font-size:.78em;font-weight:600;
+                background:rgba(127,127,127,.12);border:1px solid rgba(127,127,127,.3);opacity:.75;
+                display:inline-flex;align-items:center;gap:5px">
+                <i class="fa-solid fa-ellipsis"></i> 加载中…
+            </div>
+        </div>
+        <div id="stc-wx-hint" style="font-size:.8em;opacity:.6;line-height:1.5">
+            把一个微信<strong>小号</strong>扫码接管为你的 AI Bot。你的主号加这个小号好友后，主号的消息会经 SillyTavern 用角色卡回复。
+        </div>
+        <div id="stc-wx-actions" style="display:flex;flex-direction:column;gap:10px">
+        </div>`;
+    wrap.appendChild(wechatCard);
+
     // ━━━━ 5. Message area ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
     const msgArea = document.createElement('div');
     msgArea.id = 'stc-panel-msg';
@@ -1009,6 +1031,9 @@ function bindUserPanelButtons(content, popup) {
 
     // ── API 密钥保险箱 ──────────────────────────────────────
     wireVaultCard(content, showMsg, popup);
+
+    // ── 微信 Bot 绑定 ────────────────────────────────────────
+    wireWechatCard(content, showMsg);
 }
 
 /**
@@ -1222,6 +1247,272 @@ async function wireVaultCard(content, showMsg, parentPopup) {
         } catch (e) { showMsg('重置失败：' + e.message, false); }
     });
 
+    refresh();
+}
+
+/**
+ * Fetch WeChat binding status and render the card actions.
+ */
+async function wireWechatCard(content, showMsg) {
+    const card = content.querySelector('#stc-wechat-card');
+    if (!card) return;
+    const badgeEl = card.querySelector('#stc-wx-badge');
+    const hintEl = card.querySelector('#stc-wx-hint');
+    const actionsEl = card.querySelector('#stc-wx-actions');
+
+    const setBadge = (html, fg, bg, border) => {
+        badgeEl.innerHTML = html;
+        badgeEl.style.color = fg;
+        badgeEl.style.background = bg;
+        badgeEl.style.border = `1px solid ${border}`;
+        badgeEl.style.opacity = '1';
+    };
+
+    const refresh = async () => {
+        try {
+            const r = await fetch('/api/stc/wechat/status', { headers: await getCsrfHeaders() });
+            if (!r.ok) throw new Error(`HTTP ${r.status}`);
+            const status = await r.json();
+
+            if (!status.enabled) {
+                setBadge('<i class="fa-solid fa-circle-xmark"></i> 未开启', '#888', 'rgba(127,127,127,.1)', 'rgba(127,127,127,.3)');
+                hintEl.innerHTML = '管理员尚未启用微信 Bot 功能（config.yaml → wechat.enabled: true）。';
+                actionsEl.innerHTML = '';
+                return;
+            }
+
+            if (!status.bound) {
+                setBadge('<i class="fa-solid fa-link-slash"></i> 未绑定', '#f39c12', 'rgba(243,156,18,.1)', 'rgba(243,156,18,.3)');
+                hintEl.innerHTML = '把一个微信<strong>小号</strong>扫码接管为你的 AI Bot。<br><span style="color:#e74c3c;font-size:.85em">⚠ 不要用常用主号扫码！</span>';
+                actionsEl.innerHTML = `
+                    <button id="stc-wx-bind-btn" class="menu_button" style="padding:9px 16px;font-size:.88em;white-space:nowrap">
+                        <i class="fa-solid fa-qrcode"></i> 扫码绑定小号
+                    </button>`;
+                card.querySelector('#stc-wx-bind-btn')?.addEventListener('click', startQrLogin);
+                return;
+            }
+
+            // Bound state
+            const statusLabel = {
+                connected: '已连接',
+                disconnected: '已断开',
+                token_invalid: 'Token 失效',
+                suspended: '已挂起',
+                reconnecting: '重连中',
+            }[status.status] || status.status;
+
+            const statusColor = status.workerRunning ? '#2ecc71' : '#e74c3c';
+            setBadge(`<i class="fa-solid fa-link"></i> ${statusLabel}`, statusColor,
+                status.workerRunning ? 'rgba(46,204,113,.12)' : 'rgba(231,76,60,.1)',
+                status.workerRunning ? 'rgba(46,204,113,.3)' : 'rgba(231,76,60,.3)');
+
+            const charName = status.activeCharacterName || '未选择';
+            const stats = status.stats || { inbound: 0, outbound: 0, failed: 0 };
+
+            hintEl.innerHTML = '';
+            actionsEl.innerHTML = `
+                <div style="display:flex;flex-direction:column;gap:8px;font-size:.85em">
+                    <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
+                        <span style="opacity:.6">Bot ID:</span>
+                        <span style="font-family:monospace;opacity:.8">${esc(status.botId || '****')}</span>
+                    </div>
+                    <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
+                        <span style="opacity:.6">默认角色卡:</span>
+                        <select id="stc-wx-char-select" style="flex:1;min-width:120px;padding:5px 8px;border-radius:5px;
+                            border:1px solid var(--SmartThemeBorderColor,#444);background:var(--SmartThemeBlurTintColor,rgba(0,0,0,.3));
+                            color:inherit;font-size:.92em">
+                            <option value="">-- 选择角色卡 --</option>
+                        </select>
+                    </div>
+                    <div style="display:flex;align-items:center;gap:12px;opacity:.6;font-size:.9em">
+                        <span>入站 ${stats.inbound}</span>
+                        <span>出站 ${stats.outbound}</span>
+                        <span style="color:${stats.failed ? '#e74c3c' : 'inherit'}">失败 ${stats.failed}</span>
+                    </div>
+                </div>
+                <div style="display:flex;gap:8px;flex-wrap:wrap;border-top:1px solid var(--SmartThemeBorderColor,rgba(255,255,255,.08));padding-top:10px">
+                    <button id="stc-wx-unbind-btn" class="menu_button"
+                        style="padding:7px 14px;font-size:.84em;background:rgba(231,76,60,.1);color:#e74c3c;border:1px solid rgba(231,76,60,.4);white-space:nowrap">
+                        <i class="fa-solid fa-link-slash"></i> 解绑
+                    </button>
+                </div>
+                <details style="font-size:.82em;opacity:.7;margin-top:4px">
+                    <summary style="cursor:pointer">微信指令帮助</summary>
+                    <pre style="margin:8px 0 0;white-space:pre-wrap;line-height:1.6;opacity:.85">/help   列指令
+/chars  列角色卡
+/use xx 切换角色卡
+/new    清空上下文
+/who    当前角色
+/undo   撤销上轮</pre>
+                </details>`;
+
+            // Populate character select
+            populateCharSelect(status.activeCharacterId);
+
+            // Wire events
+            card.querySelector('#stc-wx-char-select')?.addEventListener('change', async (e) => {
+                const charId = e.target.value;
+                if (!charId) return;
+                try {
+                    const r = await fetch('/api/stc/wechat/set-character', {
+                        method: 'POST', headers: await getCsrfHeaders(),
+                        body: JSON.stringify({ characterId: charId }),
+                    });
+                    const d = await r.json();
+                    if (r.ok && d.success) {
+                        showMsg(`微信默认角色已切换为：${d.characterName}`);
+                    } else {
+                        showMsg(d.message || '切换失败', false);
+                    }
+                } catch (err) { showMsg('请求失败: ' + err.message, false); }
+            });
+
+            card.querySelector('#stc-wx-unbind-btn')?.addEventListener('click', async () => {
+                const { Popup, POPUP_TYPE, POPUP_RESULT } = await import('/scripts/popup.js');
+                const confirmId = `stc-wx-unbind-${Math.random().toString(36).slice(2)}`;
+                const box = document.createElement('div');
+                box.className = 'flex-container flexFlowColumn';
+                box.innerHTML = `
+                    <h3 style="margin:0 0 6px;color:#e74c3c">解绑微信 Bot</h3>
+                    <p style="margin:0 0 10px;font-size:.9em;line-height:1.5">
+                        解绑后 Bot 将停止工作，所有微信对话数据保留在服务器上。<br>
+                        请输入 <code>UNBIND</code> 确认：
+                    </p>
+                    <input id="${confirmId}" class="text_pole" autocomplete="off" placeholder="输入 UNBIND">`;
+                let typed = '';
+                const popup = new Popup(box, POPUP_TYPE.CONFIRM, '', {
+                    okButton: '确认解绑', cancelButton: '取消',
+                    onClose: () => { typed = document.getElementById(confirmId)?.value || ''; },
+                });
+                const result = await popup.show();
+                if (result !== POPUP_RESULT.AFFIRMATIVE || typed.trim() !== 'UNBIND') {
+                    showMsg('已取消解绑。', false); return;
+                }
+                try {
+                    const r = await fetch('/api/stc/wechat/unbind', {
+                        method: 'POST', headers: await getCsrfHeaders(),
+                        body: JSON.stringify({ confirm: 'UNBIND' }),
+                    });
+                    const d = await r.json();
+                    if (r.ok && d.success) { showMsg('微信 Bot 已解绑。'); await refresh(); }
+                    else { showMsg(d.message || '解绑失败', false); }
+                } catch (err) { showMsg('请求失败: ' + err.message, false); }
+            });
+        } catch (e) {
+            setBadge('<i class="fa-solid fa-triangle-exclamation"></i> 错误', '#e74c3c', 'rgba(231,76,60,.1)', 'rgba(231,76,60,.3)');
+            hintEl.textContent = '无法获取微信 Bot 状态：' + e.message;
+            actionsEl.innerHTML = '';
+        }
+    };
+
+    async function populateCharSelect(activeId) {
+        try {
+            const r = await fetch('/api/stc/wechat/chars', { headers: await getCsrfHeaders() });
+            if (!r.ok) return;
+            const { characters } = await r.json();
+            const select = card.querySelector('#stc-wx-char-select');
+            if (!select) return;
+            for (const c of characters) {
+                const opt = document.createElement('option');
+                opt.value = c.id;
+                opt.textContent = c.name;
+                if (c.id === activeId) opt.selected = true;
+                select.appendChild(opt);
+            }
+        } catch { /* ignore */ }
+    }
+
+    async function startQrLogin() {
+        const { Popup, POPUP_TYPE, POPUP_RESULT } = await import('/scripts/popup.js');
+
+        // Show QR popup
+        const box = document.createElement('div');
+        box.className = 'flex-container flexFlowColumn';
+        box.style.cssText = 'align-items:center;gap:14px;min-width:280px';
+        box.innerHTML = `
+            <h3 style="margin:0;display:flex;align-items:center;gap:8px">
+                <i class="fa-brands fa-weixin" style="color:#07c160"></i> 微信扫码绑定
+            </h3>
+            <p style="margin:0;font-size:.85em;opacity:.7;text-align:center;line-height:1.5">
+                请用要作为 Bot 的<strong style="color:#e74c3c">小号</strong>微信扫描下方二维码。<br>
+                扫码后该小号将被 AI 接管回复。
+            </p>
+            <div id="stc-wx-qr-container" style="width:220px;height:220px;display:flex;align-items:center;justify-content:center;
+                background:rgba(255,255,255,.05);border-radius:10px;border:1px dashed var(--SmartThemeBorderColor,#555)">
+                <i class="fa-solid fa-spinner fa-spin" style="font-size:1.5em;opacity:.5"></i>
+            </div>
+            <div id="stc-wx-qr-status" style="font-size:.82em;opacity:.6">正在获取二维码...</div>`;
+
+        const popup = new Popup(box, POPUP_TYPE.TEXT, '', { okButton: '取消' });
+
+        // Don't await popup.show() — we need to interact with the DOM while it's open
+        const popupPromise = popup.show();
+
+        try {
+            // Request QR
+            const startResp = await fetch('/api/stc/wechat/qr/start', {
+                method: 'POST', headers: await getCsrfHeaders(),
+            });
+            const startData = await startResp.json();
+
+            if (!startResp.ok || !startData.success) {
+                box.querySelector('#stc-wx-qr-container').innerHTML = `<span style="color:#e74c3c">${esc(startData.message || '获取二维码失败')}</span>`;
+                box.querySelector('#stc-wx-qr-status').textContent = '';
+                await popupPromise;
+                return;
+            }
+
+            // Show QR image
+            const qrContainer = box.querySelector('#stc-wx-qr-container');
+            qrContainer.innerHTML = `<img src="data:image/png;base64,${startData.qrImageBase64}" style="width:200px;height:200px;border-radius:6px">`;
+            box.querySelector('#stc-wx-qr-status').textContent = '等待扫码... (3分钟内有效)';
+
+            // Poll status
+            const qrId = startData.qrId;
+            let resolved = false;
+            const pollInterval = setInterval(async () => {
+                if (resolved) { clearInterval(pollInterval); return; }
+                try {
+                    const r = await fetch('/api/stc/wechat/qr/status', {
+                        method: 'POST', headers: await getCsrfHeaders(),
+                        body: JSON.stringify({ qrId }),
+                    });
+                    const d = await r.json();
+                    const statusEl = box.querySelector('#stc-wx-qr-status');
+
+                    switch (d.status) {
+                        case 'scanned':
+                            if (statusEl) statusEl.textContent = '已扫码，请在手机上确认...';
+                            break;
+                        case 'confirmed':
+                            resolved = true;
+                            clearInterval(pollInterval);
+                            if (statusEl) statusEl.innerHTML = '<span style="color:#2ecc71"><i class="fa-solid fa-circle-check"></i> 绑定成功！</span>';
+                            showMsg('微信 Bot 绑定成功！');
+                            setTimeout(() => { popup.complete(POPUP_RESULT.AFFIRMATIVE); refresh(); }, 1500);
+                            break;
+                        case 'expired':
+                            resolved = true;
+                            clearInterval(pollInterval);
+                            if (statusEl) statusEl.innerHTML = '<span style="color:#e74c3c">二维码已过期，请重新操作。</span>';
+                            break;
+                    }
+                } catch { /* ignore poll errors */ }
+            }, 2500);
+
+            await popupPromise;
+            resolved = true;
+            clearInterval(pollInterval);
+        } catch (err) {
+            showMsg('扫码绑定失败：' + err.message, false);
+            await popupPromise;
+        }
+
+        // Refresh card after popup closes
+        await refresh();
+    }
+
+    // Initial load
     refresh();
 }
 
