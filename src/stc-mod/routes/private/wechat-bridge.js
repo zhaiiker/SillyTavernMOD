@@ -50,7 +50,27 @@ router.post('/qr/start', async (request, response) => {
         }
 
         // Request QR from iLink
-        const { qrcode, qrCodeImageBase64 } = await getLoginQrCode();
+        let qrResult;
+        try {
+            qrResult = await getLoginQrCode();
+        } catch (ilinkErr) {
+            console.error('[WX] /qr/start iLink request failed:', ilinkErr.message);
+            return response.status(502).json({
+                error: true,
+                message: `无法连接 iLink 服务器（${ilinkErr.message}）。请确认服务器能访问 ilinkai.weixin.qq.com。`,
+            });
+        }
+
+        const { qrcode, qrCodeImageBase64 } = qrResult;
+
+        // Validate response — iLink may return empty data if network partially fails
+        if (!qrcode || !qrCodeImageBase64) {
+            console.error('[WX] /qr/start: iLink returned empty qrcode or image data.');
+            return response.status(502).json({
+                error: true,
+                message: '获取二维码失败：iLink 返回数据为空。请检查服务器到 ilinkai.weixin.qq.com 的网络连通性。',
+            });
+        }
 
         // Store pending session
         const qrId = `qr_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
@@ -71,7 +91,7 @@ router.post('/qr/start', async (request, response) => {
         });
     } catch (err) {
         console.error('[WX] /qr/start error:', err.message);
-        return response.status(500).json({ error: true, message: err.message });
+        return response.status(500).json({ error: true, message: `服务器内部错误：${err.message}` });
     }
 });
 
@@ -98,7 +118,17 @@ router.post('/qr/status', async (request, response) => {
         }
 
         // Check with iLink
-        const result = await getQrCodeStatus(session.qrcode);
+        let result;
+        try {
+            result = await getQrCodeStatus(session.qrcode);
+        } catch (ilinkErr) {
+            console.error('[WX] /qr/status iLink request failed:', ilinkErr.message);
+            // Don't crash the polling loop — return a transient error the frontend can retry
+            return response.status(502).json({
+                error: true,
+                message: `iLink 查询失败：${ilinkErr.message}`,
+            });
+        }
 
         if (result.status === 'confirmed' && result.botToken) {
             // Success! Create binding and start worker

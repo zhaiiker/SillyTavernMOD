@@ -1461,8 +1461,14 @@ async function wireWechatCard(content, showMsg) {
                 return;
             }
 
-            // Show QR image
+            // Show QR image (validate base64 is non-empty)
             const qrContainer = box.querySelector('#stc-wx-qr-container');
+            if (!startData.qrImageBase64) {
+                qrContainer.innerHTML = `<span style="color:#e74c3c;text-align:center;line-height:1.5;font-size:.85em">二维码数据为空。<br>请确认服务器能访问<br>ilinkai.weixin.qq.com</span>`;
+                box.querySelector('#stc-wx-qr-status').textContent = '网络不通或 iLink 服务异常';
+                await popupPromise;
+                return;
+            }
             qrContainer.innerHTML = `<img src="data:image/png;base64,${startData.qrImageBase64}" style="width:200px;height:200px;border-radius:6px">`;
             box.querySelector('#stc-wx-qr-status').textContent = '等待扫码... (3分钟内有效)';
 
@@ -1476,6 +1482,19 @@ async function wireWechatCard(content, showMsg) {
                         method: 'POST', headers: await getCsrfHeaders(),
                         body: JSON.stringify({ qrId }),
                     });
+
+                    // If server returns 502 (iLink unreachable), stop polling
+                    if (r.status === 502 || r.status === 500) {
+                        resolved = true;
+                        clearInterval(pollInterval);
+                        const errData = await r.json().catch(() => ({}));
+                        const statusEl = box.querySelector('#stc-wx-qr-status');
+                        if (statusEl) statusEl.innerHTML = `<span style="color:#e74c3c">${esc(errData.message || '服务器连接 iLink 失败')}</span>`;
+                        return;
+                    }
+
+                    if (!r.ok) return; // transient error, retry next cycle
+
                     const d = await r.json();
                     const statusEl = box.querySelector('#stc-wx-qr-status');
 
