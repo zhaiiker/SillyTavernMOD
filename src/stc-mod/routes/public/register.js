@@ -10,6 +10,8 @@ import * as invitationService from '../../services/invitation-codes.js';
 import { isEmailServiceAvailable, sendVerificationCode } from '../../services/email-service.js';
 import { applyTemplate, getTemplateMeta } from '../../services/default-template.js';
 import { getDefaultLimitMiB, isStorageLimitEnabled } from '../../services/storage-quota.js';
+import { validateRegistrationPassword } from '../../services/password-policy.js';
+import { registrationRateLimit, renewalRateLimit, verificationEmailRateLimit, verificationIpRateLimit } from '../../middleware/public-rate-limit.js';
 
 export const router = express.Router();
 
@@ -27,7 +29,7 @@ function normalizeHandle(name) {
 const WEAK_NAMES = ['admin', 'root', 'system', 'test', 'null', 'undefined', 'default', 'default-user'];
 
 // Send email verification code
-router.post('/send-verification', async (req, res) => {
+router.post('/send-verification', verificationIpRateLimit, verificationEmailRateLimit, async (req, res) => {
     try {
         const { email, userName } = req.body;
         if (!email || !userName) {
@@ -63,12 +65,17 @@ router.post('/send-verification', async (req, res) => {
 });
 
 // User registration
-router.post('/register', async (req, res) => {
+router.post('/register', registrationRateLimit, async (req, res) => {
     try {
         const { name, password, inviteCode, email, verificationCode } = req.body;
 
         if (!name || typeof name !== 'string' || name.trim().length < 2) {
             return res.status(400).json({ error: '用户名至少需要2个字符' });
+        }
+
+        const passwordValidation = validateRegistrationPassword(password);
+        if (!passwordValidation.valid) {
+            return res.status(400).json({ error: passwordValidation.error });
         }
 
         const handle = normalizeHandle(name.trim());
@@ -105,7 +112,7 @@ router.post('/register', async (req, res) => {
         // Call official SillyTavern user creation API internally
         // We need to create a simulated admin request to /api/users/create
         const { createUser } = await import('./register-helper.js');
-        const createResult = await createUser(handle, name.trim(), password || '');
+        const createResult = await createUser(handle, name.trim(), password);
 
         if (!createResult.success) {
             return res.status(400).json({ error: createResult.error || '创建用户失败' });
@@ -155,7 +162,7 @@ router.post('/register', async (req, res) => {
 });
 
 // Renew expired user account with new invitation code
-router.post('/renew-expired', async (req, res) => {
+router.post('/renew-expired', renewalRateLimit, async (req, res) => {
     try {
         const { handle, inviteCode } = req.body;
         if (!handle || !inviteCode) {

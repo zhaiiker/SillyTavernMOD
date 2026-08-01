@@ -12,6 +12,7 @@ import * as invitationService from '../../services/invitation-codes.js';
 import { getUserStorageInfo, dailyCheckIn, canUserWrite, useStorageCode, calculateUserStorage } from '../../services/storage-quota.js';
 import { requireAdminMiddleware, getAllUserHandles, toKey, getUserDirectories } from '../../../users.js';
 import { getStcConfig } from '../../config.js';
+import { renewalRateLimit } from '../../middleware/public-rate-limit.js';
 
 export const router = express.Router();
 
@@ -98,7 +99,7 @@ router.get('/me-ext', (req, res) => {
 });
 
 // Renew logged-in user with invite code
-router.post('/renew', (req, res) => {
+router.post('/renew', renewalRateLimit, (req, res) => {
     try {
         const { inviteCode } = req.body;
         const handle = req.user?.profile?.handle;

@@ -28,7 +28,9 @@ router.get('/password-status', async (request, response) => {
 
         // Check metadata for registration method
         const meta = getUserMeta(handle) || {};
-        const hasPassword = !!(user.password && user.password.length > 0);
+        const hasPassword = typeof meta.hasPassword === 'boolean'
+            ? meta.hasPassword
+            : !!(user.password && user.password.length > 0);
 
         return response.json({
             hasPassword,
@@ -78,8 +80,13 @@ router.post('/set-password', async (request, response) => {
             });
         }
 
-        // If user already has a password, verify old password
-        const hasExistingPassword = !!(user.password && user.password.length > 0);
+        // OAuth-only accounts carry a random internal password guard so they
+        // cannot be accessed through password login. It is not a user-chosen
+        // password and may be replaced without asking for the unknown guard.
+        const meta = getUserMeta(handle) || {};
+        const hasExistingPassword = typeof meta.hasPassword === 'boolean'
+            ? meta.hasPassword
+            : !!(user.password && user.password.length > 0);
         if (hasExistingPassword) {
             if (!oldPassword) {
                 return response.status(400).send({
@@ -113,7 +120,6 @@ router.post('/set-password', async (request, response) => {
         }
 
         // Update metadata to mark password as set
-        const meta = getUserMeta(handle) || {};
         setUserMeta(handle, {
             hasPassword: true,
             passwordSetAt: Date.now(),

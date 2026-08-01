@@ -119,6 +119,17 @@ export function ensureDefaultConfig() {
             // true = 信任全部跳数（不推荐）。
             trustProxy: false,
         },
+        rateLimiting: {
+            stc: {
+                registration: { points: 5, durationSeconds: 600 },
+                verificationIp: { points: 10, durationSeconds: 3600 },
+                verificationEmail: { points: 3, durationSeconds: 900 },
+                oauthStart: { points: 20, durationSeconds: 600 },
+                oauthCallback: { points: 30, durationSeconds: 600 },
+                oauthComplete: { points: 5, durationSeconds: 600 },
+                renewal: { points: 5, durationSeconds: 600 },
+            },
+        },
     };
 
     const config = loadFullConfig();

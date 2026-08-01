@@ -4,12 +4,17 @@
  */
 import express from 'express';
 import crypto from 'node:crypto';
+import storage from 'node-persist';
 import { getStcConfig } from '../../config.js';
-import { findUserByOAuth, setUserMeta, recordLogin } from '../../user-metadata.js';
+import { findUserByOAuth, getUserMeta, setUserMeta, recordLogin } from '../../user-metadata.js';
 import { createUser } from './register-helper.js';
+import { getAccountVersion, getPasswordHash, getPasswordSalt, toKey } from '../../../users.js';
 import * as invitationService from '../../services/invitation-codes.js';
 import { getDefaultLimitMiB, isStorageLimitEnabled } from '../../services/storage-quota.js';
 import { applyTemplate, getTemplateMeta } from '../../services/default-template.js';
+import { createOAuthRegistrationTicket, consumeOAuthRegistrationTicket, getOAuthRegistrationTicket } from '../../services/oauth-registration-tickets.js';
+import { validateRegistrationPassword } from '../../services/password-policy.js';
+import { oauthCallbackRateLimit, oauthCompleteRateLimit, oauthStartRateLimit } from '../../middleware/public-rate-limit.js';
 
 export const router = express.Router();
 
@@ -24,14 +29,52 @@ function getCallbackUrl(req, provider) {
     return `${proto}://${host}/api/stc/oauth/${provider}/callback`;
 }
 
+function redirectToOAuthPasswordSetup(req, res, oauthState, provider, userInfo, safeUsername) {
+    const ticket = createOAuthRegistrationTicket({
+        provider,
+        providerUserId: String(userInfo.id),
+        username: safeUsername,
+        email: userInfo.email,
+        avatar: userInfo.avatar,
+    }, oauthState.sessionBinding);
+    req.session.oauthRegistrationBinding = oauthState.sessionBinding;
+    delete req.session.oauthFlowBinding;
+
+    const fragment = new URLSearchParams({
+        oauth_ticket: ticket,
+        oauth_name: safeUsername,
+    });
+    return res.redirect(`/register#${fragment.toString()}`);
+}
+
+async function setOAuthUserPassword(handle, password) {
+    const user = await storage.getItem(toKey(handle));
+    if (!user) return null;
+
+    user.salt = getPasswordSalt();
+    user.password = getPasswordHash(password, user.salt);
+    await storage.setItem(toKey(handle), user);
+    setUserMeta(handle, {
+        hasPassword: true,
+        passwordSetAt: Date.now(),
+    });
+    return user;
+}
+
 // Initiate OAuth flow
-router.get('/:provider', (req, res) => {
+router.get('/:provider', oauthStartRateLimit, (req, res) => {
     const { provider } = req.params;
     const config = getStcConfig(`oauth.${provider}`, {});
     if (!config?.enabled) return res.status(404).json({ error: 'OAuth provider not enabled' });
 
+    if (!req.session) {
+        return res.status(500).json({ error: 'Session not available' });
+    }
+
     const state = crypto.randomBytes(16).toString('hex');
-    oauthStates.set(state, { provider, createdAt: Date.now() });
+    const sessionBinding = crypto.randomBytes(16).toString('base64url');
+    req.session.oauthFlowBinding = sessionBinding;
+    oauthStates.set(state, { provider, sessionBinding, createdAt: Date.now() });
     setTimeout(() => oauthStates.delete(state), STATE_EXPIRY);
 
     const callbackUrl = getCallbackUrl(req, provider);
@@ -55,7 +98,7 @@ router.get('/:provider', (req, res) => {
 });
 
 // OAuth callback
-router.get('/:provider/callback', async (req, res) => {
+router.get('/:provider/callback', oauthCallbackRateLimit, async (req, res) => {
     try {
         const { provider } = req.params;
         const { code, state } = req.query;
@@ -71,7 +114,8 @@ router.get('/:provider/callback', async (req, res) => {
             return res.status(400).send('缺少授权 code');
         }
 
-        if (!state || typeof state !== 'string' || !oauthStates.has(state)) {
+        const oauthState = typeof state === 'string' ? oauthStates.get(state) : null;
+        if (!oauthState || oauthState.provider !== providerStr || req.session?.oauthFlowBinding !== oauthState.sessionBinding) {
             return res.status(400).send('无效的 OAuth 状态参数');
         }
         oauthStates.delete(state);
@@ -85,71 +129,28 @@ router.get('/:provider/callback', async (req, res) => {
 
         if (!userInfo?.id) return res.status(400).send('无法获取用户信息');
 
-        // Check if user already exists
+        const safeUsername = typeof userInfo.username === 'string' && userInfo.username.trim()
+            ? userInfo.username
+            : `user-${userInfo.id}`;
+
+        // Existing OAuth users with a password can log in immediately. Legacy
+        // passwordless OAuth users must finish the password setup flow first.
         const existingHandle = findUserByOAuth(providerStr, String(userInfo.id));
 
-        if (existingHandle) {
-            // Login existing user (records lastLoginAt + lastActiveAt atomically)
+        if (existingHandle && getUserMeta(existingHandle)?.hasPassword === true) {
+            const existingUser = await storage.getItem(toKey(existingHandle));
+            if (!existingUser) return res.status(404).send('用户不存在');
+
             recordLogin(existingHandle);
             if (req.session) {
+                delete req.session.oauthFlowBinding;
                 req.session.handle = existingHandle;
+                req.session.version = getAccountVersion(existingUser);
             }
             return res.redirect('/');
         }
 
-        // New user - check if invitation code is required
-        if (invitationService.isEnabled()) {
-            // Redirect to a page where they can enter invite code
-            const encodedInfo = Buffer.from(JSON.stringify({
-                provider, id: userInfo.id, username: userInfo.username,
-                email: userInfo.email, avatar: userInfo.avatar,
-            })).toString('base64');
-            return res.redirect(`/register?oauth=${encodeURIComponent(encodedInfo)}`);
-        }
-
-        // Create new user directly
-        const safeUsername = typeof userInfo.username === 'string' && userInfo.username.trim()
-            ? userInfo.username
-            : `user-${userInfo.id}`;
-        const handle = safeUsername.toLowerCase()
-            .replace(/[^a-z0-9-]/g, '-')
-            .replace(/-+/g, '-')
-            .substring(0, 32);
-        const result = await createUser(handle, safeUsername, '');
-
-        if (!result.success) {
-            return res.status(400).send(`创建用户失败: ${result.error}`);
-        }
-
-        const userHandle = String(result.handle);
-
-        setUserMeta(userHandle, {
-            oauthProvider: providerStr,
-            oauthUserId: String(userInfo.id),
-            email: userInfo.email || null,
-            avatar: userInfo.avatar || null,
-            expiresAt: 0,
-            createdAt: Date.now(),
-            lastLoginAt: Date.now(),
-            lastActiveAt: Date.now(),
-            storageLimitMiB: isStorageLimitEnabled() ? getDefaultLimitMiB() : undefined,
-            hasPassword: false,
-            registrationMethod: providerStr,
-        });
-
-        if (getTemplateMeta()) {
-            try {
-                await applyTemplate(userHandle, { displayName: safeUsername });
-            } catch {
-                // Template application is optional; do not block OAuth login
-            }
-        }
-
-        if (req.session) {
-            req.session.handle = userHandle;
-        }
-
-        return res.redirect('/');
+        return redirectToOAuthPasswordSetup(req, res, oauthState, providerStr, userInfo, safeUsername);
     } catch (error) {
         console.error('[STC-MOD] OAuth callback error:', error);
         res.status(500).send('OAuth 登录失败: ' + error.message);
@@ -157,32 +158,57 @@ router.get('/:provider/callback', async (req, res) => {
 });
 
 // Complete OAuth registration with invite code
-router.post('/complete-registration', async (req, res) => {
+router.post('/complete-registration', oauthCompleteRateLimit, async (req, res) => {
     try {
-        const { provider, id, username, email, avatar, inviteCode } = req.body;
+        const { ticket, inviteCode, password } = req.body;
 
-        if (!provider || !id) {
-            return res.status(400).json({ error: '缺少必要参数' });
+        if (!ticket || typeof ticket !== 'string') {
+            return res.status(400).json({ error: 'OAuth 注册票据无效或已过期，请重新登录' });
         }
 
-        const providerStr = String(provider);
-        const idStr = String(id);
+        const passwordValidation = validateRegistrationPassword(password);
+        if (!passwordValidation.valid) {
+            return res.status(400).json({ error: passwordValidation.error });
+        }
 
-        if (invitationService.isEnabled()) {
+        const pendingIdentity = getOAuthRegistrationTicket(ticket, req.session?.oauthRegistrationBinding);
+        if (!pendingIdentity) {
+            return res.status(400).json({ error: 'OAuth 注册票据无效、已过期或已被使用，请重新登录' });
+        }
+
+        const pendingExistingHandle = findUserByOAuth(pendingIdentity.provider, pendingIdentity.providerUserId);
+        if (!pendingExistingHandle && invitationService.isEnabled()) {
             if (!inviteCode) return res.status(400).json({ error: '需要邀请码' });
             const inviteCodeStr = String(inviteCode);
             const validation = invitationService.validateInvitationCode(inviteCodeStr);
             if (!validation.valid) return res.status(400).json({ error: validation.reason });
         }
 
-        const baseUsername = (typeof username === 'string' && username.trim())
-            ? username
-            : `user-${id}`;
+        const oauthIdentity = consumeOAuthRegistrationTicket(ticket, req.session?.oauthRegistrationBinding);
+        if (!oauthIdentity) {
+            return res.status(400).json({ error: 'OAuth 注册票据无效、已过期或已被使用，请重新登录' });
+        }
+        delete req.session.oauthRegistrationBinding;
+
+        const providerStr = oauthIdentity.provider;
+        const idStr = oauthIdentity.providerUserId;
+        const existingHandle = findUserByOAuth(providerStr, idStr);
+        if (existingHandle) {
+            const existingUser = await setOAuthUserPassword(existingHandle, password);
+            if (!existingUser) return res.status(404).json({ error: '用户不存在' });
+
+            recordLogin(existingHandle);
+            req.session.handle = existingHandle;
+            req.session.version = getAccountVersion(existingUser);
+            return res.json({ success: true, handle: existingHandle, existing: true });
+        }
+
+        const baseUsername = oauthIdentity.username?.trim() || `user-${idStr}`;
         const handle = baseUsername.toLowerCase()
             .replace(/[^a-z0-9-]/g, '-')
             .replace(/-+/g, '-')
             .substring(0, 32);
-        const result = await createUser(handle, baseUsername, '');
+        const result = await createUser(handle, baseUsername, password);
 
         if (!result.success) {
             return res.status(400).json({ error: result.error });
@@ -200,14 +226,15 @@ router.post('/complete-registration', async (req, res) => {
         setUserMeta(userHandle, {
             oauthProvider: providerStr,
             oauthUserId: idStr,
-            email: email || null,
-            avatar: avatar || null,
+            email: oauthIdentity.email || null,
+            avatar: oauthIdentity.avatar || null,
             expiresAt,
             createdAt: Date.now(),
             lastLoginAt: Date.now(),
             lastActiveAt: Date.now(),
             storageLimitMiB: isStorageLimitEnabled() ? getDefaultLimitMiB() : undefined,
-            hasPassword: false,
+            hasPassword: true,
+            passwordSetAt: Date.now(),
             registrationMethod: providerStr,
         });
 
@@ -221,6 +248,8 @@ router.post('/complete-registration', async (req, res) => {
 
         if (req.session) {
             req.session.handle = userHandle;
+            const createdUser = await storage.getItem(toKey(userHandle));
+            if (createdUser) req.session.version = getAccountVersion(createdUser);
         }
 
         res.json({ success: true, handle: userHandle });

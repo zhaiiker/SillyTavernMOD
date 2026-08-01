@@ -329,10 +329,10 @@
 
         <div class="field">
             <div class="field-label">
-                <i class="fa-solid fa-lock"></i> 密码 <span style="font-size:.8em;color:rgba(255,255,255,.3);margin-left:4px">（可选）</span>
+                <i class="fa-solid fa-lock"></i> 密码 <span class="req">*</span>
             </div>
-            <input type="password" id="regPassword" placeholder="设置登录密码（可留空）"
-                   autocomplete="new-password">
+            <input type="password" id="regPassword" placeholder="设置登录密码（至少 8 个字符）"
+                   autocomplete="new-password" minlength="8" required>
             <div id="pwdStrengthBar"><div id="pwdStrengthFill"></div></div>
         </div>
 
@@ -431,17 +431,20 @@ async function initConfig() {
         document.getElementById('emailSection').style.display = '';
     }
 
-    const params = new URLSearchParams(location.search);
-    const oauthData = params.get('oauth');
-    if (oauthData) {
-        try {
-            const data = JSON.parse(atob(oauthData));
-            const nameInput = document.getElementById('regName');
-            nameInput.value = data.username || '';
-            nameInput.readOnly = true;
-            document.getElementById('regPassword').closest('.field').style.display = 'none';
-            window._oauthData = data;
-        } catch {}
+    const oauthParams = new URLSearchParams(location.hash.slice(1));
+    const oauthTicket = oauthParams.get('oauth_ticket');
+    if (oauthTicket) {
+        const nameInput = document.getElementById('regName');
+        const passwordInput = document.getElementById('regPassword');
+        nameInput.value = oauthParams.get('oauth_name') || '';
+        nameInput.readOnly = true;
+        passwordInput.closest('.field').style.display = '';
+        passwordInput.required = true;
+        window._oauthTicket = oauthTicket;
+        document.getElementById('emailSection').style.display = 'none';
+        document.getElementById('registerBtn').innerHTML = '<i class="fa-solid fa-key"></i> 设置密码并继续';
+        history.replaceState(null, '', location.pathname + location.search);
+        showSuccess('OAuth 授权成功，请设置至少 8 位密码完成注册');
     }
 }
 
@@ -451,7 +454,7 @@ document.getElementById('regPassword').addEventListener('input', function() {
     const fill = document.getElementById('pwdStrengthFill');
     if (!pw) { fill.style.width = '0'; return; }
     let score = 0;
-    if (pw.length >= 6)  score++;
+    if (pw.length >= 8)  score++;
     if (pw.length >= 10) score++;
     if (/[A-Z]/.test(pw)) score++;
     if (/[0-9]/.test(pw)) score++;
@@ -519,12 +522,17 @@ document.getElementById('registerForm').addEventListener('submit', async () => {
     const verificationCode = document.getElementById('regVerCode').value.trim();
 
     if (!name || name.length < 2) { showError('用户名至少需要2个字符'); return; }
+    if (password.length < 8) {
+        showError('密码长度至少需要 8 个字符');
+        document.getElementById('regPassword').focus();
+        return;
+    }
     if (stcConfig.enableInvitationCodes && !inviteCode) {
         showError('请输入激活码（注册必须填写）');
         document.getElementById('regInviteCode').focus();
         return;
     }
-    if (stcConfig.enableEmailVerification) {
+    if (stcConfig.enableEmailVerification && !window._oauthTicket) {
         if (!email) { showError('请填写邮箱地址'); return; }
         if (!verificationCode) { showError('请填写邮箱验证码'); return; }
     }
@@ -533,25 +541,25 @@ document.getElementById('registerForm').addEventListener('submit', async () => {
     btn.disabled = true;
     btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> 注册中...';
 
-    if (window._oauthData) {
+    if (window._oauthTicket) {
         try {
             const resp = await fetch('/api/stc/oauth/complete-registration', {
                 method: 'POST', headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ ...window._oauthData, inviteCode }),
+                body: JSON.stringify({ ticket: window._oauthTicket, inviteCode, password }),
             });
             const data = await resp.json();
             if (data.success) {
-                showSuccess('注册成功！正在跳转...');
+                showSuccess(data.existing ? '密码设置成功！正在跳转...' : '注册成功！正在跳转...');
                 setTimeout(() => { window.location.href = '/'; }, 1200);
             } else {
                 showError(data.error || '注册失败');
                 btn.disabled = false;
-                btn.innerHTML = '<i class="fa-solid fa-user-plus"></i> 创建账号';
+                btn.innerHTML = '<i class="fa-solid fa-key"></i> 设置密码并继续';
             }
         } catch {
             showError('网络错误，请稍后重试');
             btn.disabled = false;
-            btn.innerHTML = '<i class="fa-solid fa-user-plus"></i> 创建账号';
+            btn.innerHTML = '<i class="fa-solid fa-key"></i> 设置密码并继续';
         }
         return;
     }
