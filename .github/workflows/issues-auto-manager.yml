@@ -15,7 +15,7 @@ jobs:
   label-on-content:
     name: 🏷️ Label Issues by Content
     runs-on: ubuntu-latest
-    if: always()
+    if: github.repository == 'SillyTavern/SillyTavern' && always()
 
     steps:
       - name: Mint App Token
@@ -49,7 +49,7 @@ jobs:
     name: 🏷️ Label Issues by Labels
     needs: [label-on-content]
     runs-on: ubuntu-latest
-    if: always()
+    if: github.repository == 'SillyTavern/SillyTavern' && always()
 
     steps:
       - name: Mint App Token
@@ -107,7 +107,7 @@ jobs:
     needs: [label-on-content, label-on-labels]
     runs-on: ubuntu-latest
     # Only run this on new comments, to automatically remove the stale label
-    if: always() && (github.event_name == 'issue_comment' && github.event.sender.type != 'Bot')
+    if: github.repository == 'SillyTavern/SillyTavern' && always() && (github.event_name == 'issue_comment' && github.event.sender.type != 'Bot')
 
     steps:
       - name: Mint App Token
@@ -134,7 +134,7 @@ jobs:
     name: 💬 Post Issue Comments Based on Labels
     needs: [label-on-content, label-on-labels, remove-stale-label]
     runs-on: ubuntu-latest
-    if: always()
+    if: github.repository == 'SillyTavern/SillyTavern' && always()
 
     steps:
       - name: Mint App Token

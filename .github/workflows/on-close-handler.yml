@@ -15,7 +15,7 @@ jobs:
   remove-labels:
     name: 🗑️ Remove Pending Labels on Close
     runs-on: ubuntu-latest
-    if: always()
+    if: github.repository == 'SillyTavern/SillyTavern' && always()
 
     steps:
       - name: Mint App Token

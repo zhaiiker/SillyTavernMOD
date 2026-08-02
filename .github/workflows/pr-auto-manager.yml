@@ -18,7 +18,7 @@ jobs:
     needs: [label-by-branches, label-by-files, label-copilot-prs, remove-stale-label, check-merge-blocking-labels, write-auto-comments]
     runs-on: ubuntu-latest
     # Only needs to run when code is changed
-    if: always() && (github.event.action == 'opened' || github.event.action == 'synchronize')
+    if: github.repository == 'SillyTavern/SillyTavern' && always() && (github.event.action == 'opened' || github.event.action == 'synchronize')
 
     # Override permissions, the labeler needs issues write access
     permissions:
@@ -61,7 +61,7 @@ jobs:
     name: 🏷️ Label PR by Branches
     runs-on: ubuntu-latest
     # Only label once when PR is created or when base branch is changed, to allow manual label removal
-    if: always() && (github.event.action == 'opened' || (github.event.action == 'synchronize' && github.event.changes.base))
+    if: github.repository == 'SillyTavern/SillyTavern' && always() && (github.event.action == 'opened' || (github.event.action == 'synchronize' && github.event.changes.base))
 
     steps:
       - name: Mint App Token
@@ -92,7 +92,7 @@ jobs:
     needs: [label-by-branches]
     runs-on: ubuntu-latest
     # Only needs to run when code is changed
-    if: always() && (github.event.action == 'opened' || github.event.action == 'synchronize')
+    if: github.repository == 'SillyTavern/SillyTavern' && always() && (github.event.action == 'opened' || github.event.action == 'synchronize')
 
     steps:
       - name: Mint App Token
@@ -125,6 +125,7 @@ jobs:
     runs-on: ubuntu-latest
     # Only label once when PR is created by Copilot
     if: >
+      github.repository == 'SillyTavern/SillyTavern' &&
       github.event.action == 'opened' &&
       github.event.pull_request.user.login == 'Copilot'
 
@@ -154,7 +155,7 @@ jobs:
     needs: [label-by-branches, label-by-files, label-copilot-prs]
     runs-on: ubuntu-latest
     # Only runs on comments not done by the github actions bot
-    if: always() && (github.event_name == 'pull_request_review_comment' && github.event.sender.type != 'Bot')
+    if: github.repository == 'SillyTavern/SillyTavern' && always() && (github.event_name == 'pull_request_review_comment' && github.event.sender.type != 'Bot')
 
     # Override permissions, issue labeler needs issues write access
     permissions:
@@ -192,7 +193,7 @@ jobs:
     needs: [label-by-branches, label-by-files, label-copilot-prs, remove-stale-label]
     runs-on: ubuntu-latest
     # Run, even if the previous jobs were skipped/failed
-    if: always()
+    if: github.repository == 'SillyTavern/SillyTavern' && always()
 
     # Override permissions, as this needs to write a check
     permissions:
@@ -242,7 +243,7 @@ jobs:
     needs: [label-by-branches, label-by-files, label-copilot-prs, remove-stale-label, check-merge-blocking-labels]
     runs-on: ubuntu-latest
     # Run, even if the previous jobs were skipped/failed
-    if: always() && (github.event_name == 'pull_request_target')
+    if: github.repository == 'SillyTavern/SillyTavern' && always() && (github.event_name == 'pull_request_target')
 
     steps:
       - name: Mint App Token
@@ -273,6 +274,7 @@ jobs:
     name: 🔗 Mark Linked Issues Done on Staging Merge
     runs-on: ubuntu-latest
     if: >
+      github.repository == 'SillyTavern/SillyTavern' &&
       always() &&
       github.event_name == 'pull_request_target' &&
       github.event.pull_request.merged == true &&
