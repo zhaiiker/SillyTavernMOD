@@ -1,5 +1,8 @@
 ﻿# SillyTavern + SillyTavernchat (STC-MOD)
 
+[![Publish to Docker Hub](https://github.com/McDtot/SillyTavernMOD/actions/workflows/dockerhub-publish.yml/badge.svg?branch=release)](https://github.com/McDtot/SillyTavernMOD/actions/workflows/dockerhub-publish.yml)
+[![Docker Hub](https://img.shields.io/docker/pulls/mcdlol/sillytavernmod?logo=docker&label=Docker%20Hub)](https://hub.docker.com/r/mcdlol/sillytavernmod)
+
 LLM Frontend for Power Users  
 本仓库基于 **SillyTavern 1.18.0 官方版本**，在其上通过「外挂模块 / Sidecar Module」方式集成了
 `SillyTavernchat (STC-MOD)` 的一系列管理与运营功能，同时尽量保持对上游的 **低侵入、易升级**。
@@ -10,7 +13,7 @@ LLM Frontend for Power Users
 
 - [项目概览](#项目概览)
 - [运行与基础使用](#运行与基础使用)
-- [使用 Docker 部署（官方镜像）](#使用-docker-部署官方镜像)
+- [使用 Docker 部署（本项目镜像）](#使用-docker-部署本项目镜像)
 - [反向代理部署（nginx / OpenResty / Cloudflare）](#反向代理部署nginx--openresty--cloudflare)
 - [STC-MOD 功能概览](#stc-mod-功能概览)
 - [升级与二次开发注意事项](#升级与二次开发注意事项)
@@ -35,7 +38,7 @@ LLM Frontend for Power Users
 
 ## 运行与基础使用
 
-> 以下步骤以仓库地址 `https://github.com/zhaiiker/SillyTavernMOD` 为例，假设当前工作目录为项目根目录。
+> 以下步骤以仓库地址 `https://github.com/McDtot/SillyTavernMOD` 为例，假设当前工作目录为项目根目录。
 >
 > 说明：当前仓库已合并为**唯一维护分支**，今后安装、更新与二次开发都默认基于当前默认分支进行，无需再手动切换历史功能分支。
 
@@ -48,7 +51,7 @@ LLM Frontend for Power Users
 ### 2. 获取代码并安装依赖
 
 ```bash
-git clone https://github.com/zhaiiker/SillyTavernMOD.git
+git clone https://github.com/McDtot/SillyTavernMOD.git
 cd SillyTavernMOD
 
 npm install
@@ -101,9 +104,12 @@ npm run start
 
 ---
 
-## 使用 Docker 部署（官方镜像）
+## 使用 Docker 部署（本项目镜像）
 
-本仓库已在 Docker Hub 提供预构建镜像：`zhaiker/sillytavernmod:latest`  
+本仓库已在 Docker Hub 提供公开的预构建镜像：[`mcdlol/sillytavernmod`](https://hub.docker.com/r/mcdlol/sillytavernmod)。
+该镜像由本仓库的 GitHub Actions 自动构建，并非 SillyTavern 官方镜像；目前支持 `linux/amd64` 和 `linux/arm64`。
+普通用户推荐使用 `mcdlol/sillytavernmod:latest`，需要固定版本或回退时可使用 `release-<短 SHA>` 标签。
+
 适合不想本地装 Node/npm、只想一条命令跑起来的用户。
 
 容器内应用目录为 **`/home/node/app`**，持久化时请把 **配置、用户数据、插件、第三方扩展** 分别挂到对应路径（见下表）。**不要**把宿主机某个目录错误地挂到 `config`（例如把名为 `data` 的文件夹挂到 `.../config`），否则配置与用户数据会混在一起。
@@ -130,7 +136,7 @@ docker run -d \
   -v ./data:/home/node/app/data \
   -v ./plugins:/home/node/app/plugins \
   -v ./extensions:/home/node/app/public/scripts/extensions/third-party \
-  zhaiker/sillytavernmod:latest
+  mcdlol/sillytavernmod:latest
 ```
 
 ### 方式一（变体）：Linux 服务器、绝对路径（推荐生产）
@@ -152,7 +158,7 @@ docker run -d \
   -v /root/sillytavern/data:/home/node/app/data \
   -v /root/sillytavern/plugins:/home/node/app/plugins \
   -v /root/sillytavern/extensions:/home/node/app/public/scripts/extensions/third-party \
-  zhaiker/sillytavernmod:latest
+  mcdlol/sillytavernmod:latest
 ```
 
 说明：
@@ -175,29 +181,29 @@ docker run -d \
 1. 克隆本仓库并进入 `docker` 目录：
 
 ```bash
-git clone https://github.com/zhaiiker/SillyTavernMOD.git
+git clone https://github.com/McDtot/SillyTavernMOD.git
 cd SillyTavernMOD/docker
 ```
 
 2. 确认 `docker-compose.yml` 中镜像名为：
 
 ```yaml
-image: zhaiker/sillytavernmod:latest
+image: mcdlol/sillytavernmod:latest
 ```
 
 3. 一键启动：
 
 ```bash
-docker compose up -d
+docker compose pull
+docker compose up -d --no-build
 ```
 
 4. 更新到最新镜像时：
 
 ```bash
-docker pull zhaiker/sillytavernmod:latest
 cd SillyTavernMOD/docker
-docker compose down
-docker compose up -d
+docker compose pull
+docker compose up -d --no-build --force-recreate
 ```
 
 ### 方式三：纯 `docker` 用户的更新（无 compose）
@@ -207,7 +213,7 @@ docker compose up -d
 
 ```bash
 # 1. 拉取 Docker Hub 上的最新镜像
-docker pull zhaiker/sillytavernmod:latest
+docker pull mcdlol/sillytavernmod:latest
 
 # 2. 停止并删除旧容器（挂载的 config/data/plugins/extensions 不会被删除）
 docker stop sillytavernmod && docker rm sillytavernmod
@@ -222,14 +228,14 @@ docker run -d \
   -v ./data:/home/node/app/data \
   -v ./plugins:/home/node/app/plugins \
   -v ./extensions:/home/node/app/public/scripts/extensions/third-party \
-  zhaiker/sillytavernmod:latest
+  mcdlol/sillytavernmod:latest
 ```
 
 > 仓库的默认分支（`release`）每次有新提交时，GitHub Actions 会自动构建 `linux/amd64` + `linux/arm64`
 > 多架构镜像并推送到 Docker Hub：
 >
-> - `zhaiker/sillytavernmod:latest` — 最新版（推荐普通用户使用）
-> - `zhaiker/sillytavernmod:release-<短 SHA>` — 便于回退到某一次具体构建
+> - `mcdlol/sillytavernmod:latest` — 最新版（推荐普通用户使用）
+> - `mcdlol/sillytavernmod:release-<短 SHA>` — 便于回退到某一次具体构建
 >
 > 普通用户无需自己 `git pull` / 重新构建，只要 `docker pull ... :latest` 然后重启容器即可拿到更新。
 
