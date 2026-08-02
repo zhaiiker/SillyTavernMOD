@@ -315,7 +315,11 @@ app.use(multerMonkeyPatch);
 
 app.get('/version', async function (_, response) {
     const data = await getVersion();
-    response.send(data);
+    response.send({
+        ...data,
+        gitRevision: null,
+        gitBranch: null,
+    });
 });
 
 redirectDeprecatedEndpoints(app);
