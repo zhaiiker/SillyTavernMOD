@@ -3,7 +3,7 @@ services:
     build: ..
     container_name: sillytavernmod
     hostname: sillytavernmod
-    image: zhaiker/sillytavernmod:latest
+    image: mcdlol/sillytavernmod:latest
 
     environment:
       - NODE_ENV=production

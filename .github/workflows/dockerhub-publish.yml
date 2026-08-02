@@ -1,10 +1,10 @@
 # 每次往默认分支（release）推送代码，或手动触发，
 # 都会构建多架构镜像并推送到 Docker Hub：
-#   zhaiker/sillytavernmod:latest
-#   zhaiker/sillytavernmod:release-<short-sha>
+#   mcdlol/sillytavernmod:latest
+#   mcdlol/sillytavernmod:release-<short-sha>
 #
 # 首次使用前，请在本仓库的 GitHub 设置里添加两个 Secrets：
-#   DOCKERHUB_USERNAME = zhaiker
+#   DOCKERHUB_USERNAME = mcdlol
 #   DOCKERHUB_TOKEN    = 在 https://hub.docker.com/settings/security 生成的 Access Token
 #                        （至少 Read/Write 权限；不要使用登录密码）
 
@@ -29,7 +29,7 @@ concurrency:
 jobs:
   build-and-push:
     # 仅在我们自己的仓库里跑，fork 出去的仓库默认跳过（避免别人的 PR 意外触发）
-    if: github.repository == 'zhaiiker/SillyTavernMOD'
+    if: github.repository == 'McDtot/SillyTavernMOD'
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -54,7 +54,7 @@ jobs:
         id: meta
         uses: docker/metadata-action@v5
         with:
-          images: zhaiker/sillytavernmod
+          images: mcdlol/sillytavernmod
           # latest       → 每次 release 分支构建都覆盖（给普通用户用）
           # release-sha7 → 每次构建生成的稳定回溯标签
           # <input.tag>  → 手动触发时可以再补一个标签（例如 "v2026.05"）
@@ -65,7 +65,7 @@ jobs:
           labels: |
             org.opencontainers.image.title=SillyTavernMOD (STC-MOD)
             org.opencontainers.image.description=SillyTavern 1.18.0 fork with SillyTavernchat (STC-MOD) sidecar features.
-            org.opencontainers.image.source=https://github.com/zhaiiker/SillyTavernMOD
+            org.opencontainers.image.source=https://github.com/McDtot/SillyTavernMOD
             org.opencontainers.image.licenses=AGPL-3.0
 
       - name: Build and push multi-arch image
@@ -90,5 +90,5 @@ jobs:
           echo "" >> "$GITHUB_STEP_SUMMARY"
           echo "Users can update with:" >> "$GITHUB_STEP_SUMMARY"
           echo '```bash' >> "$GITHUB_STEP_SUMMARY"
-          echo 'docker pull zhaiker/sillytavernmod:latest' >> "$GITHUB_STEP_SUMMARY"
+          echo 'docker pull mcdlol/sillytavernmod:latest' >> "$GITHUB_STEP_SUMMARY"
           echo '```' >> "$GITHUB_STEP_SUMMARY"
